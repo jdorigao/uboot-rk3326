@@ -1,0 +1,94 @@
+name: Build U-Boot RK3326
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+jobs:
+  build-uboot:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git \
+            bc \
+            build-essential \
+            curl \
+            xz-utils \
+            ca-certificates \
+            device-tree-compiler \
+            u-boot-tools \
+            gcc-aarch64-linux-gnu \
+            g++-aarch64-linux-gnu
+
+      - name: Download and extract Linaro toolchain
+        run: |
+          mkdir -p /opt/toolchains
+          curl -L https://releases.linaro.org/components/toolchain/binaries/7.5-2019.12/aarch64-linux-gnu/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu.tar.xz \
+            -o gcc-linaro.tar.xz
+          sudo tar -xJf gcc-linaro.tar.xz -C /opt/toolchains
+          rm gcc-linaro.tar.xz
+
+      - name: Clone U-Boot repository
+        run: |
+          git clone --depth=1 -b RK3326 https://github.com/ROCKNIX/hardkernel-uboot.git u-boot
+
+      - name: Build U-Boot
+        working-directory: u-boot
+        run: |
+          sed -i 's/6\.3\.1-2017\.05/7.5.0-2019.12/g' make.sh
+          chmod +x make.sh
+          export PATH="/opt/toolchains/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu/bin:$PATH"
+          ./make.sh odroidgoa
+
+      - name: Prepare output directory
+        run: |
+          mkdir -p uboot-rk3326
+          cp u-boot/sd_fuse/idbloader.img uboot-rk3326/
+          cp u-boot/sd_fuse/uboot.img uboot-rk3326/
+          cp u-boot/sd_fuse/trust.img uboot-rk3326/
+          ls -lh uboot-rk3326/
+
+      - name: Create compressed archive
+        run: |
+          tar -czf uboot-rk3326.tar.gz uboot-rk3326/
+          zip -r uboot-rk3326.zip uboot-rk3326/
+
+      - name: Upload artifacts (tar.gz)
+        uses: actions/upload-artifact@v4
+        with:
+          name: uboot-rk3326-tarball
+          path: uboot-rk3326.tar.gz
+          retention-days: 30
+
+      - name: Upload artifacts (zip)
+        uses: actions/upload-artifact@v4
+        with:
+          name: uboot-rk3326-zip
+          path: uboot-rk3326.zip
+          retention-days: 30
+
+      - name: Upload raw binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: uboot-rk3326-binaries
+          path: uboot-rk3326/
+          retention-days: 30
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            uboot-rk3326.tar.gz
+            uboot-rk3326.zip
+          generate_release_notes: true
